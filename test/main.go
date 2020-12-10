@@ -1,48 +1,70 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 
-	deezer "github.com/deezer/src"
+	"github.com/sirupsen/logrus"
+	"github.com/tecnologer/deezer/src/deezer"
 	"github.com/tecnologer/go-secrets"
 )
 
 var port = flag.Int("port", 8088, "port")
+var port2 = flag.Int("port2", 8089, "port")
+var verbouse = flag.Bool("v", false, "enable verbose")
 
 func main() {
 	flag.Parse()
+
+	if *verbouse {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
 
 	deezerSecrets, err := secrets.GetGroup("deezer")
 	if err != nil {
 		panic(err)
 	}
-	appID := deezerSecrets.GetString("appId")
+
+	appID := deezerSecrets.GetString("app_id")
 	secretKey := deezerSecrets.GetString("secret_key")
 	redirectURL := deezerSecrets.GetString("redirect_uri")
 
-	deezer := deezer.NewDeezer(appID, secretKey, redirectURL)
+	d := deezer.New(appID, secretKey, redirectURL)
 
-	if !deezer.IsAuth() {
-		deezer.OpenOAuth()
-	}
+	http.HandleFunc("/search-artist", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Add("Content-Type", "application/json")
 
-	host := fmt.Sprintf(":%d", *port)
-	log.Println(host)
-	log.Println(http.ListenAndServe(host, http.HandlerFunc(webhookReceiver)))
-}
+		params := req.URL.Query()
 
-func webhookReceiver(res http.ResponseWriter, req *http.Request) {
-	res.Header().Add("Content-Type", "application/json")
+		if len(params) == 0 {
+			log.Println("no params in the url")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("invalid request"))
+			return
+		}
+		query := params.Get("q")
 
-	params := req.URL.Query()
+		data, err := d.SearchArtist(query)
 
-	if len(params) == 0 {
-		log.Println("no params in the url")
-		return
-	}
-	code := params.Get("code")
-	fmt.Println(code)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("fail searching: %v", err)))
+			return
+		}
+
+		datares, err := json.Marshal(data)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("fail parsing result: %v", err)))
+			return
+		}
+
+		w.Write(datares)
+	})
+
+	d.Start(*port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port2), nil))
 }
