@@ -9,6 +9,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"github.com/tecnologer/deezer/src/deezer/settings"
 	"github.com/tecnologer/deezer/src/models"
 	"github.com/tecnologer/deezer/src/tools/browser"
 )
@@ -31,11 +32,15 @@ type Deezer struct {
 
 //New creates a new instance of deezer
 func New(appID, secretKey, redirect string) *Deezer {
+	token, _ := settings.GetToken()
+	if token == nil {
+		token = &models.AcessToken{}
+	}
 	return &Deezer{
 		appID:       appID,
 		secretKey:   secretKey,
 		RedirectURL: redirect,
-		auth:        new(models.AcessToken),
+		auth:        token,
 	}
 }
 
@@ -98,9 +103,12 @@ func (d *Deezer) getToken(code *models.AuthCode) {
 	logrus.Debug(string(resBody))
 
 	err = json.Unmarshal(resBody, d.auth)
-
 	if err != nil {
 		logrus.WithError(err).WithField("body", string(resBody)).Error("parsing token")
+	}
+	err = settings.SetToken(d.auth)
+	if err != nil {
+		logrus.WithError(err).Warn("get token: saving token in settings")
 	}
 }
 
